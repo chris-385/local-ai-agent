@@ -1,0 +1,4 @@
+Chris studies Software Technology at THM.
+He is currently doing an exchange semester in Jakarta.
+Chris is building a local AI agent with Python, Ollama, LangChain and ChromaDB.
+The project uses llama3.2:3b as the local language model.
