@@ -1,4 +1,4 @@
-# Form — local AI fitness assistant
+# FitCoach AI — local fitness assistant
 
 Start the app in the existing project:
 
@@ -14,12 +14,14 @@ Start Ollama in a separate terminal if it is not already running as a service. V
 
 The app has four sections:
 
-- **Overview:** Current profile, personal goal, optional target weight, weight history, and links to active plans.
-- **Training:** Active and previous training plans, individual sessions, and exercises with sets, reps, and additional weight. Charts show weight and volume per exercise as well as weekly training time.
-- **Nutrition:** Daily calories and macros, optional self-defined targets, a meal log, camera and image upload with editable AI estimates, and an active meal plan.
-- **Coach:** A personal streaming chat. Adoption actions appear only for concrete plan suggestions and only for the matching plan type. Regular chat responses do not show actions. After review, concrete exercise suggestions can be added to the active plan or replace a selected exercise. Previous plan versions remain available, duplicate adoptions are prevented, and truncated responses are not treated as complete plans.
+- **Home:** Today at a glance (weight, distance to target, calories, workouts this week), quick actions, weight progress, and the status of your plans.
+- **Training:** Log a workout with its exercises in one form, see weekly training time and exercise progress, and view or create your training plan.
+- **Nutrition:** Today's calories and macros against optional targets, logging meals manually or from a photo (with editable AI estimates), and your meal plan.
+- **AI Coach:** A streaming chat with one-click suggestions. Concrete plan or exercise suggestions can be added to your active plans; previous versions remain available.
 
-Saved plans appear in their respective sections and as links on Overview. Adding a coach suggestion does not automatically change profile values or nutrition targets. The latest logged weight is included in AI requests.
+**Profiles:** Use the profile selector in the sidebar to switch between people, **New** to create a profile, and **Edit** to change or delete the active one. Every profile has its own weight history, workouts, meals, targets, plans, and chats. Data from before profiles existed belongs to the first profile.
+
+Saved plans appear in their respective sections and as links on the Dashboard. Adding an AI Coach suggestion does not automatically change profile values or nutrition targets. The latest logged weight is included in AI requests.
 
 Profiles, meals, weight entries, and training data from the original German version remain compatible. New entries use English labels and values. Entries can be exported or deleted in their respective sections.
 
@@ -29,6 +31,6 @@ Run tests without real AI calls:
 .venv/bin/python -m unittest discover -s tests -p 'test_fitness*.py' -v
 ```
 
-Data is stored in `data/fitness.sqlite3`; images are not stored permanently. Ollama receives the profile or image through localhost, so no cloud API is required. All app sessions share the same local database. The app is intended for personal use on one computer and has no user separation or authentication. Set `FITNESS_DB` to use a different database path in tests.
+Data is stored in `data/fitness.sqlite3`; images are not stored permanently. Ollama receives the profile or image through localhost, so no cloud API is required. All app sessions share the same local database. Profiles separate data for convenience, but there is no authentication: anyone with access to the app can open every profile. Set `FITNESS_DB` to use a different database path in tests.
 
 The existing `app.py` remains the original document assistant. The fitness app does not provide medically validated plans or guaranteed photo accuracy. Review generated plans before use, and correct photo-based portions and ingredients before saving.

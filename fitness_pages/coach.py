@@ -1,45 +1,48 @@
 from datetime import date
 import hashlib
 import streamlit as st
-from fitness_core import stream_coach, records, save
-from fitness_ui import profile, flash, page_header
+from fitness_core import stream_coach
+from fitness_ui import add, ai_context, data, flash, page_header, profile
 from fitness_actions import detect_action, exercise_lines, change_exercise
 
 flash()
-page_header('Coach', 'Ask questions, build plans, and add useful suggestions directly.', ':material/forum:')
 p=profile()
-if not p:
-    st.info('Save your profile so the coach can consider your goals and limitations.',icon=':material/person:')
+SUGGESTIONS={
+    'Create my training plan':('Create a training plan for me','Create a complete, compact training plan with exercises, sets, reps, and rest periods tailored to the profile.','Create training plan',':material/fitness_center:'),
+    'Create my meal plan':('Create a meal plan for me','Create a complete, compact meal plan with portions and estimated nutrition values tailored to the profile. Strictly follow allergies.','Create meal plan',':material/restaurant:'),
+    'How do I get started?':('How do I get started with my goal?',None,'Ask a question',':material/flag:'),
+}
 
-chats = records('coach_chat')
-with st.container(border=True):
-    mode=st.segmented_control('How can I help?',['Ask a question','Create training plan','Create meal plan'],default='Ask a question',key='coach_mode',width='stretch')
-    with st.container(horizontal=True,vertical_alignment='center'):
-        if chats:
-            with st.popover('Chat history',icon=':material/history:'):
-                chat_options={}
-                for row in reversed(chats):
-                    history=row.get('history',[])
-                    first_question=next((content for role,content in history if role=='user'),'Conversation')
-                    title=first_question.replace('\n',' ')[:45]
-                    chat_options[f"{title} · {row['day']} · #{row['id']}"]=row
-                selected_chat_label=st.selectbox('Select a conversation',list(chat_options),key='load_chat')
-                if st.button('Open conversation',icon=':material/open_in_new:',width='stretch'):
-                    chat_data=chat_options[selected_chat_label]
-                    st.session_state.fitness_chat=chat_data['history']
-                    st.session_state['coach_actions']={int(k):v for k,v in chat_data.get('actions',{}).items()}
-                    st.rerun()
-        if st.button('New conversation',key='reset_chat',icon=':material/add_comment:',type='tertiary'):
-            st.session_state.fitness_chat=[]
-            st.session_state['coach_actions']={}
-            st.rerun()
+with st.container(horizontal=True,vertical_alignment='center'):
+    with st.container(width='stretch'):
+        page_header('AI Coach','Ask anything about training and nutrition.',':material/auto_awesome:')
+    chats=data('coach_chat')
+    if chats:
+        with st.popover('History',icon=':material/history:',type='tertiary'):
+            chat_options={}
+            for row in reversed(chats):
+                history=row.get('history',[])
+                first_question=next((content for role,content in history if role=='user'),'Conversation')
+                chat_options[f"{first_question.replace(chr(10),' ')[:45]} · {row['day']} · #{row['id']}"]=row
+            selected_chat_label=st.selectbox('Conversation',list(chat_options),key='load_chat')
+            if st.button('Open',icon=':material/open_in_new:',width='stretch'):
+                chat_data=chat_options[selected_chat_label]
+                st.session_state.fitness_chat=chat_data['history']
+                st.session_state['coach_actions']={int(k):v for k,v in chat_data.get('actions',{}).items()}
+                st.rerun()
+    if st.session_state.fitness_chat and st.button('New chat',key='reset_chat',icon=':material/add_comment:',type='tertiary'):
+        st.session_state.fitness_chat=[]
+        st.session_state['coach_actions']={}
+        st.rerun()
+if not p:
+    st.caption(':material/person: Create a profile on Home so the coach can consider your goals and limitations.')
 
 def adoption_actions(content,index,action):
     if action not in ('training_plan','nutrition_plan','exercise'):
         return
     if action == 'exercise':
         with st.expander('Add exercise to my training plan',icon=':material/add_circle:'):
-            plans=records('training_plan')
+            plans=data('training_plan')
             if not plans:
                 st.info('Save a training plan first. You can then add or replace exercises.',icon=':material/info:')
                 return
@@ -70,7 +73,7 @@ def adoption_actions(content,index,action):
                         updated='\n'.join(lines)
                     else:
                         updated=change_exercise(active['content'],suggestion,day)
-                    save('training_plan',date.today(),{'content':updated,'profile':active.get('profile'),'source':'coach','previous_plan_id':active['id'],'change_token':change_token,'change':{'operation':operation,'day':day,'exercise':suggestion}})
+                    add('training_plan',date.today(),{'content':updated,'profile':active.get('profile'),'source':'coach','previous_plan_id':active['id'],'change_token':change_token,'change':{'operation':operation,'day':day,'exercise':suggestion}})
                     st.session_state['fitness_flash']='Training plan updated. The previous version is still available.'
                     st.rerun()
                 except ValueError as exc:
@@ -81,17 +84,22 @@ def adoption_actions(content,index,action):
     with st.expander('Add plan to my profile',icon=':material/save:'):
         st.caption('Use this suggestion as your active plan. Previous versions remain available.')
         if not p:
-            st.caption('Save your profile in Overview first.')
+            st.caption('Create your profile on Home first.')
         token=hashlib.sha256((kind+content).encode()).hexdigest()
-        saved=any(r.get('source_token')==token for r in records(kind))
+        saved=any(r.get('source_token')==token for r in data(kind))
         if st.button('Already added' if saved else label,key=f'adopt_{index}_{kind}',disabled=saved or not p,icon=':material/check:',type='primary'):
-            save(kind,date.today(),{'content':content,'profile':p,'source':'coach','source_token':token})
+            add(kind,date.today(),{'content':content,'profile':p,'source':'coach','source_token':token})
             st.rerun()
 
+suggested=None
 if not st.session_state.fitness_chat:
     with st.container(border=True,horizontal_alignment='center'):
-        st.subheader('What would you like to achieve today?',icon=':material/auto_awesome:',anchor=False)
-        st.caption('Ask about training or nutrition, or create a personalized plan.')
+        st.subheader('What would you like to achieve today?',anchor=False)
+        st.caption('Pick a suggestion or type your own question below.')
+        with st.container(horizontal=True,horizontal_alignment='center'):
+            for label,(_,_,_,icon) in SUGGESTIONS.items():
+                if st.button(label,icon=icon,key='suggest_'+label):
+                    suggested=label
 
 for index,(role,content) in enumerate(st.session_state.fitness_chat):
     with st.chat_message(role):
@@ -102,27 +110,21 @@ for index,(role,content) in enumerate(st.session_state.fitness_chat):
             # from older sessions must never force an irrelevant adoption action.
             action=detect_action(previous,content)
             adoption_actions(content,index,action)
-question=st.chat_input('Message your coach …',max_chars=4000)
+question=st.chat_input('Message your AI Coach …',max_chars=4000)
+mode='Ask a question'
+request=question
+if suggested:
+    question,instruction,mode,_=SUGGESTIONS[suggested]
+    request=f'{instruction} Request: {question}' if instruction else question
 if question:
     with st.chat_message('user'):
         st.markdown(question)
     try:
         plan=mode!='Ask a question' or 'plan' in question.lower()
-        request=question
-        if mode=='Create training plan':
-            request='Create a complete, compact training plan with exercises, sets, reps, and rest periods tailored to the profile. Request: '+question
-        elif mode=='Create meal plan':
-            request='Create a complete, compact meal plan with portions and estimated nutrition values tailored to the profile. Strictly follow allergies. Request: '+question
-        targets=records('nutrition_targets')
-        context=dict(p or {})
-        weights=records('weight')
-        if weights:
-            context['Current weight (kg)']=weights[-1]['kg']
-        if targets:
-            context['Self-defined nutrition targets']={k:v for k,v in targets[-1].items() if k not in ('id','day')}
+        context=ai_context()
         with st.chat_message('assistant'):
             status=st.empty()
-            status.caption('Coach is starting … the response will appear as it is written.')
+            status.caption('AI Coach is starting … the response will appear as it is written.')
             def chunks():
                 for chunk in stream_coach(st.session_state['fitness_text_model'],context,st.session_state.fitness_chat,request,plan=plan):
                     status.empty()
@@ -131,9 +133,9 @@ if question:
         index=len(st.session_state.fitness_chat)+1
         st.session_state.setdefault('coach_actions',{})[index]=detect_action(question,answer,mode)
         st.session_state.fitness_chat.extend([('user',question),('assistant',answer)])
-        save('coach_chat', date.today(), {'history': st.session_state.fitness_chat, 'actions': st.session_state.get('coach_actions', {})})
+        add('coach_chat', date.today(), {'history': st.session_state.fitness_chat, 'actions': st.session_state.get('coach_actions', {})})
         st.rerun()
     except Exception as exc:
         if 'status' in locals():
             status.empty()
-        st.error(f'Coach unavailable: {exc}. Please try again.')
+        st.error(f'AI Coach unavailable: {exc}. Please try again.')

@@ -6,34 +6,83 @@ import math
 import os
 from pathlib import Path
 import sqlite3
+import urllib.error
 import urllib.request
 from PIL import Image, ImageOps
 
 DB = Path(os.environ.get('FITNESS_DB', Path(__file__).parent / 'data/fitness.sqlite3'))
 
+DEFAULT_OWNER = 'main'  # Records saved before profiles existed belong to the first profile.
+
+
 def connect():
     DB.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(DB)
     db.execute('CREATE TABLE IF NOT EXISTS records (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, day TEXT NOT NULL, payload TEXT NOT NULL)')
+    if 'owner' not in {row[1] for row in db.execute('PRAGMA table_info(records)')}:
+        db.execute('ALTER TABLE records ADD COLUMN owner TEXT')
     return db
 
-def save(kind, day, payload):
+def save(kind, day, payload, owner=None):
     with connect() as db:
-        db.execute('INSERT INTO records(kind,day,payload) VALUES (?,?,?)', (kind, str(day), json.dumps(payload, ensure_ascii=False)))
+        return db.execute('INSERT INTO records(kind,day,payload,owner) VALUES (?,?,?,?)', (kind, str(day), json.dumps(payload, ensure_ascii=False), owner)).lastrowid
 
-def records(kind):
+def records(kind, owner=None):
+    """Return records of one kind; with ``owner``, only those of that profile."""
+    query = 'SELECT id,day,payload FROM records WHERE kind=?'
+    params = [kind]
+    if owner is not None:
+        query += ' AND COALESCE(owner,?)=?'
+        params += [DEFAULT_OWNER, owner]
     with connect() as db:
-        return [dict(id=r[0], day=r[1], **json.loads(r[2])) for r in db.execute('SELECT id,day,payload FROM records WHERE kind=? ORDER BY day,id', (kind,))]
+        return [dict(id=r[0], day=r[1], **json.loads(r[2])) for r in db.execute(query + ' ORDER BY day,id', params)]
+
+def profiles():
+    """Latest version of every profile as {owner: profile}, in creation order."""
+    result = {}
+    with connect() as db:
+        rows = db.execute("SELECT COALESCE(owner,?),payload FROM records WHERE kind='profile' ORDER BY id", (DEFAULT_OWNER,))
+        for owner, payload in rows:
+            result[owner] = json.loads(payload)
+    return result
 
 def delete(record_id):
     with connect() as db:
         db.execute('DELETE FROM records WHERE id=?', (record_id,))
 
-def models():
+def delete_owner(owner):
+    """Remove a profile together with all of its data."""
+    with connect() as db:
+        db.execute('DELETE FROM records WHERE COALESCE(owner,?)=?', (DEFAULT_OWNER, owner))
+
+RECOMMENDED_VISION_MODEL = 'llama3.2-vision:11b'
+
+
+def _installed():
     with urllib.request.urlopen('http://localhost:11434/api/tags', timeout=3) as response:
-        return [m['name'] for m in json.load(response)['models']
-                if 'completion' in m.get('capabilities', []) or
-                (not m.get('capabilities') and 'embed' not in m['name'].lower())]
+        return json.load(response)['models']
+
+def models():
+    return [m['name'] for m in _installed()
+            if 'completion' in m.get('capabilities', []) or
+            (not m.get('capabilities') and 'embed' not in m['name'].lower())]
+
+def vision_models():
+    """Installed models that can read images (Ollama reports the 'vision' capability)."""
+    return [m['name'] for m in _installed() if 'vision' in m.get('capabilities', [])]
+
+def _open(request):
+    """Open an Ollama request and turn HTTP errors into Ollama's own readable message."""
+    try:
+        return urllib.request.urlopen(request, timeout=180)
+    except urllib.error.HTTPError as exc:
+        try:
+            message = json.loads(exc.read()).get('error') or str(exc)
+        except Exception:
+            message = str(exc)
+        if exc.code == 404 and 'not found' in message:
+            message += f'. Install it with: ollama pull {json.loads(request.data).get("model")}'
+        raise RuntimeError(message) from None
 
 def ask(model, prompt, image=None, structured=False):
     message = {'role':'user', 'content':prompt}
@@ -49,7 +98,7 @@ def ask(model, prompt, image=None, structured=False):
     if structured:
         body['format'] = 'json'
     request = urllib.request.Request('http://localhost:11434/api/chat', data=json.dumps(body).encode(), headers={'Content-Type':'application/json'})
-    with urllib.request.urlopen(request, timeout=180) as response:
+    with _open(request) as response:
         answer = json.load(response)['message']['content']
     return json.loads(answer) if structured else answer
 
@@ -97,7 +146,7 @@ def stream_coach(model, profile, history, question, *, plan=False):
         headers={'Content-Type': 'application/json'})
     completed = False
     received = False
-    with urllib.request.urlopen(request, timeout=180) as response:
+    with _open(request) as response:
         for line in response:
             if not line.strip():
                 continue
